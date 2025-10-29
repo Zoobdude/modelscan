@@ -3,6 +3,7 @@ import bdb
 import http.client
 import importlib
 import io
+import json
 import numpy as np
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import torch
 import tensorflow as tf
 import tf_keras as keras
@@ -1648,9 +1650,6 @@ def test_main_defaultgroup(file_path: Any) -> None:
 
 def test_sarif_output(file_path: Any) -> None:
     """Test SARIF output format with malicious model"""
-    import json
-    import tempfile
-
     ms = ModelScan()
 
     # Scan a malicious pickle file
@@ -1661,9 +1660,9 @@ def test_sarif_output(file_path: Any) -> None:
     ms._settings["reporting"]["module"] = "modelscan.reports.SARIFReport"
 
     # Generate report to a temporary file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".sarif", delete=False) as f:
-        temp_file = f.name
-        ms._settings["reporting"]["settings"]["output_file"] = temp_file
+    fd, temp_file = tempfile.mkstemp(suffix=".sarif")
+    os.close(fd)
+    ms._settings["reporting"]["settings"]["output_file"] = temp_file
 
     try:
         ms.generate_report()
@@ -1714,9 +1713,6 @@ def test_sarif_output(file_path: Any) -> None:
 
 def test_sarif_output_clean(file_path: Any) -> None:
     """Test SARIF output format with benign model"""
-    import json
-    import tempfile
-
     ms = ModelScan()
 
     # Scan a benign pickle file
@@ -1727,9 +1723,9 @@ def test_sarif_output_clean(file_path: Any) -> None:
     ms._settings["reporting"]["module"] = "modelscan.reports.SARIFReport"
 
     # Generate report to a temporary file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".sarif", delete=False) as f:
-        temp_file = f.name
-        ms._settings["reporting"]["settings"]["output_file"] = temp_file
+    fd, temp_file = tempfile.mkstemp(suffix=".sarif")
+    os.close(fd)
+    ms._settings["reporting"]["settings"]["output_file"] = temp_file
 
     try:
         ms.generate_report()
@@ -1762,13 +1758,11 @@ def test_sarif_output_clean(file_path: Any) -> None:
 
 def test_sarif_cli_output(file_path: Any) -> None:
     """Test SARIF output via CLI"""
-    import tempfile
-
     argv = sys.argv
     temp_file = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".sarif", delete=False) as f:
-            temp_file = f.name
+        fd, temp_file = tempfile.mkstemp(suffix=".sarif")
+        os.close(fd)
 
         sys.argv = [
             "modelscan",
@@ -1784,8 +1778,6 @@ def test_sarif_cli_output(file_path: Any) -> None:
         assert result == 1  # Should return 1 for vulnerabilities found
 
         # Verify the file was created and is valid JSON
-        import json
-
         with open(temp_file, "r") as f:
             sarif_data = json.load(f)
 
