@@ -1644,3 +1644,157 @@ def test_main_defaultgroup(file_path: Any) -> None:
         pass
     finally:
         sys.argv = argv
+
+
+def test_sarif_output(file_path: Any) -> None:
+    """Test SARIF output format with malicious model"""
+    import json
+    import tempfile
+
+    ms = ModelScan()
+
+    # Scan a malicious pickle file
+    p = Path(f"{file_path}/data/malicious0.pkl")
+    ms.scan(p)
+
+    # Set SARIF reporting
+    ms._settings["reporting"]["module"] = "modelscan.reports.SARIFReport"
+
+    # Generate report to a temporary file
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".sarif", delete=False) as f:
+        temp_file = f.name
+        ms._settings["reporting"]["settings"]["output_file"] = temp_file
+
+    try:
+        ms.generate_report()
+
+        # Read and validate the SARIF output
+        with open(temp_file, "r") as f:
+            sarif_data = json.load(f)
+
+        # Validate SARIF structure
+        assert (
+            sarif_data["$schema"]
+            == "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
+        )
+        assert sarif_data["version"] == "2.1.0"
+        assert len(sarif_data["runs"]) == 1
+
+        run = sarif_data["runs"][0]
+
+        # Validate tool information
+        assert run["tool"]["driver"]["name"] == "ModelScan"
+        assert "informationUri" in run["tool"]["driver"]
+
+        # Validate results
+        assert len(run["results"]) > 0
+        result = run["results"][0]
+        assert "ruleId" in result
+        assert "level" in result
+        assert result["level"] in ["error", "warning", "note"]
+        assert "message" in result
+        assert "locations" in result
+
+        # Validate location structure
+        location = result["locations"][0]
+        assert "physicalLocation" in location
+        assert "artifactLocation" in location["physicalLocation"]
+        assert "uri" in location["physicalLocation"]["artifactLocation"]
+
+        # Validate properties
+        assert "properties" in result
+        assert "module" in result["properties"]
+        assert "operator" in result["properties"]
+        assert "severity" in result["properties"]
+
+    finally:
+        # Clean up temp file
+        Path(temp_file).unlink(missing_ok=True)
+
+
+def test_sarif_output_clean(file_path: Any) -> None:
+    """Test SARIF output format with benign model"""
+    import json
+    import tempfile
+
+    ms = ModelScan()
+
+    # Scan a benign pickle file
+    p = Path(f"{file_path}/data/benign0_v3.pkl")
+    ms.scan(p)
+
+    # Set SARIF reporting
+    ms._settings["reporting"]["module"] = "modelscan.reports.SARIFReport"
+
+    # Generate report to a temporary file
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".sarif", delete=False) as f:
+        temp_file = f.name
+        ms._settings["reporting"]["settings"]["output_file"] = temp_file
+
+    try:
+        ms.generate_report()
+
+        # Read and validate the SARIF output
+        with open(temp_file, "r") as f:
+            sarif_data = json.load(f)
+
+        # Validate SARIF structure
+        assert (
+            sarif_data["$schema"]
+            == "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
+        )
+        assert sarif_data["version"] == "2.1.0"
+        assert len(sarif_data["runs"]) == 1
+
+        run = sarif_data["runs"][0]
+
+        # Validate tool information
+        assert run["tool"]["driver"]["name"] == "ModelScan"
+
+        # Validate that there are no results for clean model
+        assert len(run["results"]) == 0
+        assert run["properties"]["summary"]["total_issues"] == 0
+
+    finally:
+        # Clean up temp file
+        Path(temp_file).unlink(missing_ok=True)
+
+
+def test_sarif_cli_output(file_path: Any) -> None:
+    """Test SARIF output via CLI"""
+    import tempfile
+
+    argv = sys.argv
+    temp_file = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".sarif", delete=False) as f:
+            temp_file = f.name
+
+        sys.argv = [
+            "modelscan",
+            "-p",
+            f"{file_path}/data/malicious0.pkl",
+            "-r",
+            "sarif",
+            "-o",
+            temp_file,
+        ]
+
+        result = cli()
+        assert result == 1  # Should return 1 for vulnerabilities found
+
+        # Verify the file was created and is valid JSON
+        import json
+
+        with open(temp_file, "r") as f:
+            sarif_data = json.load(f)
+
+        assert sarif_data["version"] == "2.1.0"
+        assert len(sarif_data["runs"]) == 1
+
+    except SystemExit:
+        pass
+    finally:
+        sys.argv = argv
+        if temp_file:
+            Path(temp_file).unlink(missing_ok=True)
