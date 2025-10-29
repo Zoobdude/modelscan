@@ -96,3 +96,119 @@ class JSONReport(Report):
         if output:
             with open(output, "w") as outfile:
                 json.dump(report, outfile)
+
+
+class SARIFReport(Report):
+    @staticmethod
+    def generate(
+        scan: ModelScan,
+        settings: Dict[str, Any] = {},
+    ) -> None:
+        """
+        Generate SARIF format report.
+        SARIF (Static Analysis Results Interchange Format) is a standard format for 
+        static analysis tool output.
+        """
+        from modelscan._version import __version__
+        
+        results = scan._generate_results()
+        
+        # Map severity levels to SARIF levels
+        severity_map = {
+            "CRITICAL": "error",
+            "HIGH": "error",
+            "MEDIUM": "warning",
+            "LOW": "note",
+        }
+        
+        # Build SARIF rules from issues
+        rules = []
+        rule_ids = set()
+        
+        # Use the JSON-formatted issues which have relative paths
+        for issue in results.get("issues", []):
+            rule_id = f"modelscan/{issue['operator']}"
+            if rule_id not in rule_ids:
+                rule_ids.add(rule_id)
+                rules.append({
+                    "id": rule_id,
+                    "name": f"Unsafe{issue['operator']}",
+                    "shortDescription": {
+                        "text": f"Use of unsafe operator '{issue['operator']}'"
+                    },
+                    "fullDescription": {
+                        "text": f"Use of unsafe operator '{issue['operator']}' from module '{issue['module']}'"
+                    },
+                    "help": {
+                        "text": f"The operator '{issue['operator']}' from module '{issue['module']}' can be used to execute arbitrary code and poses a security risk."
+                    },
+                    "defaultConfiguration": {
+                        "level": severity_map.get(issue['severity'], "warning")
+                    },
+                    "properties": {
+                        "tags": ["security", "model-scanning"],
+                        "precision": "high"
+                    }
+                })
+        
+        # Build SARIF results from issues
+        sarif_results = []
+        for issue in results.get("issues", []):
+            rule_id = f"modelscan/{issue['operator']}"
+            sarif_results.append({
+                "ruleId": rule_id,
+                "level": severity_map.get(issue['severity'], "warning"),
+                "message": {
+                    "text": f"Use of unsafe operator '{issue['operator']}' from module '{issue['module']}'"
+                },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": {
+                            "uri": issue['source'],
+                            "uriBaseId": "%SRCROOT%"
+                        }
+                    }
+                }],
+                "properties": {
+                    "module": issue['module'],
+                    "operator": issue['operator'],
+                    "scanner": issue['scanner'],
+                    "severity": issue['severity']
+                }
+            })
+        
+        # Build the complete SARIF document
+        sarif_report = {
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [{
+                "tool": {
+                    "driver": {
+                        "name": "ModelScan",
+                        "version": __version__,
+                        "informationUri": "https://github.com/protectai/modelscan",
+                        "rules": rules
+                    }
+                },
+                "results": sarif_results,
+                "properties": {
+                    "summary": {
+                        "total_issues": results["summary"]["total_issues"],
+                        "total_issues_by_severity": results["summary"]["total_issues_by_severity"],
+                        "total_scanned": results["summary"]["scanned"]["total_scanned"]
+                    }
+                },
+                "originalUriBaseIds": {
+                    "%SRCROOT%": {
+                        "uri": results["summary"]["absolute_path"] + "/"
+                    }
+                }
+            }]
+        }
+        
+        print(json.dumps(sarif_report, indent=2))
+        
+        output = settings.get("output_file")
+        if output:
+            with open(output, "w") as outfile:
+                json.dump(sarif_report, outfile, indent=2)
